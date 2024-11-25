@@ -2,7 +2,7 @@
 <simconf version="2023090101">
   <simulation>
     <title>My simulation</title>
-    <speedlimit>2.0</speedlimit>
+    <speedlimit>20.0</speedlimit>
     <randomseed>123456</randomseed>
     <motedelay_us>1000000</motedelay_us>
     <radiomedium>
@@ -39,7 +39,7 @@
       <mote>
         <interface_config>
           org.contikios.cooja.interfaces.Position
-          <pos x="72.13975733201055" y="6.098536962325419" />
+          <pos x="112.11165506071225" y="44.78539879590109" />
         </interface_config>
         <interface_config>
           org.contikios.cooja.contikimote.interfaces.ContikiMoteID
@@ -71,7 +71,7 @@
       <mote>
         <interface_config>
           org.contikios.cooja.interfaces.Position
-          <pos x="43.867911691134815" y="35.36843868676977" />
+          <pos x="79.38495839074405" y="70.53525609954025" />
         </interface_config>
         <interface_config>
           org.contikios.cooja.contikimote.interfaces.ContikiMoteID
@@ -81,7 +81,7 @@
       <mote>
         <interface_config>
           org.contikios.cooja.interfaces.Position
-          <pos x="104.68540760421081" y="33.67919801573774" />
+          <pos x="144.8680470493397" y="73.45912917882191" />
         </interface_config>
         <interface_config>
           org.contikios.cooja.contikimote.interfaces.ContikiMoteID
@@ -91,7 +91,7 @@
       <mote>
         <interface_config>
           org.contikios.cooja.interfaces.Position
-          <pos x="22.570154443474856" y="65.74991552683494" />
+          <pos x="163.9633095367107" y="113.30525752806655" />
         </interface_config>
         <interface_config>
           org.contikios.cooja.contikimote.interfaces.ContikiMoteID
@@ -109,9 +109,9 @@
       <skin>org.contikios.cooja.plugins.skins.TrafficVisualizerSkin</skin>
       <skin>org.contikios.cooja.plugins.skins.UDGMVisualizerSkin</skin>
       <skin>org.contikios.cooja.plugins.skins.MoteTypeVisualizerSkin</skin>
-      <viewport>1.2372332977562814 0.0 0.0 1.2372332977562814 80.72972485284903 72.83133445030424</viewport>
+      <viewport>2.4169949137185256 0.0 0.0 2.4169949137185256 -147.29122661534024 -3.0130140763453657</viewport>
     </plugin_config>
-    <bounds x="1" y="1" height="400" width="400" z="1" />
+    <bounds x="-21" y="5" height="400" width="293" z="2" />
   </plugin>
   <plugin>
     org.contikios.cooja.plugins.LogListener
@@ -120,7 +120,7 @@
       <formatted_time />
       <coloring />
     </plugin_config>
-    <bounds x="400" y="160" height="414" width="1266" />
+    <bounds x="270" y="5" height="568" width="1396" z="1" />
   </plugin>
   <plugin>
     org.contikios.cooja.plugins.TimeLine
@@ -135,13 +135,5 @@
       <zoomfactor>500.0</zoomfactor>
     </plugin_config>
     <bounds x="0" y="577" height="166" width="1666" z="3" />
-  </plugin>
-  <plugin>
-    org.contikios.cooja.plugins.Notes
-    <plugin_config>
-      <notes>Enter notes here</notes>
-      <decorations>true</decorations>
-    </plugin_config>
-    <bounds x="400" y="0" height="160" width="1266" z="2" />
   </plugin>
 </simconf>

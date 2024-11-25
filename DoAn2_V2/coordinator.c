@@ -22,36 +22,160 @@
 #define MAX_NODES 16
 #define CHECK_INTERVAL (CLOCK_SECOND * 5)
 
-
 /************************************************
  *                  Structs                     *
  ************************************************/
+/* Structure to hold statistics for each node */
 typedef struct {
-  uint16_t tx_count;
-  uint16_t rx_count;
-  uip_ipaddr_t node_addr;
-  uip_ipaddr_t parent_addr;
+  uint16_t tx_count;        // Transmission count
+  uint16_t rx_count;        // Reception count
+  uip_ipaddr_t node_addr;   // Node IP address
+  uip_ipaddr_t parent_addr; // Parent IP address
+  uint16_t ping_sent;       // Total PINGs sent
+  uint16_t pong_received;   // Total PONGs received
+  uint16_t rtt;             // Round-Trip Time in ms
+  int16_t temperature;      // Temperature in Celsius
+   int16_t rssi;             // RSSI for received packet
 } node_stats_t;
+
+/* Structure for sensor payload including PING data */
+typedef struct {
+  uint8_t node_id;          // Node ID
+  uint16_t tx_count;        // Transmission count
+  uint16_t rx_count;        // Reception count (PONG received)
+  uint64_t send_time;       // Send time (network uptime ticks)
+  int16_t temperature;      // Temperature in Celsius
+  uip_ipaddr_t parent_addr; // Parent IP address
+  uint16_t ping_sent;       // Total PINGs sent
+  uint16_t pong_received;   // Total PONGs received
+  uint16_t rtt;             // Round-Trip Time in ms
+} sensor_payload_t;
 
 /************************************************
  *              Global variables                *
  ************************************************/
 static node_stats_t node_stats[MAX_NODES];
 static struct simple_udp_connection udp_conn;
-
+static int16_t nodes_to_check[] = {4, 15, 88, 171}; // Valid node IDs
 
 /************************************************
  *                  Functions                   *
  ************************************************/
+/* Map a node ID to a valid index in node_stats */
+static int get_node_index(uint16_t node_id) {
+  for(int i = 0; i < sizeof(nodes_to_check) / sizeof(nodes_to_check[0]); i++) {
+    if(nodes_to_check[i] == node_id) {
+      return i; // Return the index if node_id matches
+    }
+  }
+  return -1; // Return -1 if node_id is not valid
+}
+
+/* Function to print routing table and node statistics */
+static void print_routing_table() {
+  uip_ipaddr_t coordinator_addr;
+  if(NETSTACK_ROUTING.get_root_ipaddr(&coordinator_addr)) {
+    printf("Coordinator: ");
+    uip_debug_ipaddr_print(&coordinator_addr);
+    printf("\r\nRouting and Node Statistics:\r\n");
+  } else {
+    printf("Coordinator address unavailable.\r\n");
+  }
+
+  for(int j = 0; j < sizeof(nodes_to_check) / sizeof(nodes_to_check[0]); j++) {
+    int node_id = nodes_to_check[j];
+    int index = get_node_index(node_id);
+    if(index >= 0 && node_stats[index].rx_count > 0) {
+      printf("Node ID %d [", node_id);
+      uip_debug_ipaddr_print(&node_stats[index].node_addr);
+      printf("] via ");
+      if(uip_is_addr_unspecified(&node_stats[index].parent_addr)) {
+        printf("root");
+      } else {
+        uip_debug_ipaddr_print(&node_stats[index].parent_addr);
+      }
+
+      int packet_loss = (node_stats[index].ping_sent > 0) ? 
+                  (int)((1.0 - ((float)node_stats[index].pong_received / node_stats[index].ping_sent)) * 100) : 100;
+
+
+      printf(" | TX: %u | RX: %u | PRR: %d%% | Temp: %dC | RSSI: %d | PING Sent: %u | PONG Received: %u | Packet Loss: %d%% | RTT: %u ms\r\n",
+             node_stats[index].tx_count,
+             node_stats[index].rx_count,
+             (node_stats[index].tx_count > 0) ? 
+               (int)((float)node_stats[index].rx_count / node_stats[index].tx_count * 100) : 0,
+             node_stats[index].temperature,
+             node_stats[index].rssi,
+             node_stats[index].ping_sent,
+             node_stats[index].pong_received,
+             packet_loss,
+             node_stats[index].rtt);
+    }
+  }
+}
+
+/* UDP receive callback function */
 static void udp_rx_callback(struct simple_udp_connection *c,
                             const uip_ipaddr_t *sender_addr,
                             uint16_t sender_port,
                             const uip_ipaddr_t *receiver_addr,
                             uint16_t receiver_port,
                             const uint8_t *data,
-                            uint16_t datalen);
+                            uint16_t datalen) {
+  /* Check if the message is a PING request */
+  if(datalen >= 1 && data[0] == 'P') { // 'P' denotes a PING message
+    char pong_msg[] = "PONG";
+    simple_udp_sendto(&udp_conn, pong_msg, sizeof(pong_msg), sender_addr);
 
-static void print_routing_table();
+    LOG_INFO("PONG sent to Node ");
+    uip_debug_ipaddr_print(sender_addr);
+    LOG_INFO_("\r\n");
+    return;
+  }
+
+  /* Check if the message is a sensor_payload_t */
+  if(datalen == sizeof(sensor_payload_t)) {
+    sensor_payload_t received_data;
+    memcpy(&received_data, data, sizeof(sensor_payload_t));
+
+    int index = get_node_index(received_data.node_id);
+    if(index < 0) {
+      LOG_ERR("Invalid node ID %u\r\n", received_data.node_id);
+      return;
+    }
+
+    /* Update node statistics */
+    node_stats[index].tx_count = received_data.tx_count;
+    node_stats[index].rx_count++;
+    node_stats[index].temperature = received_data.temperature;
+    node_stats[index].ping_sent = received_data.ping_sent;
+    node_stats[index].pong_received = received_data.pong_received;
+    node_stats[index].rtt = received_data.rtt;
+    uip_ipaddr_copy(&node_stats[index].node_addr, sender_addr);
+    uip_ipaddr_copy(&node_stats[index].parent_addr, &received_data.parent_addr);
+
+    /* Get RSSI of received packet */
+    node_stats[index].rssi = packetbuf_attr(PACKETBUF_ATTR_RSSI);
+
+    /* Calculate Packet Reception Ratio (PRR) */
+    int prr = (node_stats[index].tx_count > 0) ? 
+              (int)((float)node_stats[index].rx_count / node_stats[index].tx_count * 100) : 0;
+
+    /* Log sensor data and PING data */
+    LOG_INFO("Node %u | TX: %u | RX: %u | PRR: %d%% | Temp: %dC | RSSI: %d | PING Sent: %u | PONG Received: %u | RTT: %u ms\r\n",
+             received_data.node_id,
+             received_data.tx_count,
+             node_stats[index].rx_count,
+             prr,
+             received_data.temperature,
+             node_stats[index].rssi,
+             received_data.ping_sent,
+             received_data.pong_received,
+             received_data.rtt);
+  } else {
+    LOG_ERR("Received packet with unexpected size: %u bytes\r\n", datalen);
+  }
+}
 
 /************************************************
  *                  Processes                   *
@@ -68,8 +192,10 @@ PROCESS_THREAD(coordinator_process, ev, data) {
   sixtop_add_sf(&sf_simple_driver);
   NETSTACK_MAC.on();
 
+  /* Register UDP connection */
   simple_udp_register(&udp_conn, UDP_PORT, NULL, UDP_PORT, udp_rx_callback);
 
+  /* Set timer for periodic checks */
   etimer_set(&timer, CHECK_INTERVAL);
   while(1) {
     PROCESS_YIELD();
@@ -81,71 +207,4 @@ PROCESS_THREAD(coordinator_process, ev, data) {
   }
 
   PROCESS_END();
-}
-
-
-/* UDP receive callback function */
-static void udp_rx_callback(struct simple_udp_connection *c,
-                            const uip_ipaddr_t *sender_addr,
-                            uint16_t sender_port,
-                            const uip_ipaddr_t *receiver_addr,
-                            uint16_t receiver_port,
-                            const uint8_t *data,
-                            uint16_t datalen) {
-  uint8_t node_id = data[0];
-  
-  if(node_id == 4 || node_id == 15 || node_id == 88 || node_id == 171 ) {
-    uint16_t tx_count = (data[1] << 8) | data[2];
-    int16_t real_temp = (data[11] << 8) | data[12];
-    int16_t rssi = packetbuf_attr(PACKETBUF_ATTR_RSSI);
-
-    // Update transmission and reception counts
-    node_stats[node_id].tx_count = tx_count;
-    node_stats[node_id].rx_count++;
-
-    // Set the node's own address and its parent address
-    uip_ipaddr_copy(&node_stats[node_id].node_addr, sender_addr);
-    memcpy(&node_stats[node_id].parent_addr, &data[13], sizeof(uip_ipaddr_t));
-
-    // Calculate Packet Reception Ratio (PRR)
-    int prr = (node_stats[node_id].tx_count > 0) ? 
-              (int)((float)node_stats[node_id].rx_count / node_stats[node_id].tx_count * 100) : 0;
-
-    LOG_INFO("Node %u | TX: %u | RX: %u | PRR: %d%% | RSSI: %d | Temperature: %dC\r\n",
-             node_id, node_stats[node_id].tx_count, node_stats[node_id].rx_count,
-             prr, rssi, real_temp);
-  } else {
-    LOG_ERR("Invalid node ID %u\r\n", node_id);
-  }
-}
-
-/* Function to print routing table */
-static void print_routing_table() {
-  uip_ipaddr_t coordinator_addr;
-  if(NETSTACK_ROUTING.get_root_ipaddr(&coordinator_addr)) {
-    printf("Coordinator: ");
-    uip_debug_ipaddr_print(&coordinator_addr);
-    printf("\r\nRouting Table:\r\n");
-  } else {
-    printf("Coordinator address unavailable.\r\n");
-  }
-
-// Check and print information only for nodes 4, 15, 88, and 171
-int nodes_to_check[] = {4, 15, 88, 171};
-
-for(int j = 0; j < sizeof(nodes_to_check) / sizeof(nodes_to_check[0]); j++) {
-    int node_id = nodes_to_check[j];
-    if(node_stats[node_id].rx_count > 0) {
-        printf("Node ID %d [", node_id);
-        uip_debug_ipaddr_print(&node_stats[node_id].node_addr); // Print the node's own address
-        printf("] via ");
-
-        if(uip_is_addr_unspecified(&node_stats[node_id].parent_addr)) {
-            printf("root"); // If no specific parent, assume root
-        } else {
-            uip_debug_ipaddr_print(&node_stats[node_id].parent_addr); // Print parent address if available
-        }
-        printf("\r\n");
-    }
-}
 }
